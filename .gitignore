@@ -1,5 +1,6 @@
 # Ignore any built binaries.
 terraform-provider-vsphere*
+vsphere-report
 
 # Ignore distribution directories.
 dist/
