@@ -499,6 +499,248 @@ func fetchResourcePools(ctx context.Context, finder *find.Finder, pc *property.C
 	return out, nil
 }
 
+// ── ESXi host detail types ────────────────────────────────────────────────────
+
+type HostPNIC struct {
+	Host     string `json:"host"`
+	Device   string `json:"device"`
+	MAC      string `json:"mac"`
+	SpeedMb  int32  `json:"speedMb"`
+	Duplex   bool   `json:"fullDuplex"`
+	Driver   string `json:"driver"`
+	LinkUp   bool   `json:"linkUp"`
+}
+
+type HostVMKNIC struct {
+	Host        string `json:"host"`
+	Device      string `json:"device"`
+	IPAddress   string `json:"ipAddress"`
+	SubnetMask  string `json:"subnetMask"`
+	MACAddress  string `json:"macAddress"`
+	MTU         int32  `json:"mtu"`
+	Portgroup   string `json:"portgroup"`
+	VDS         string `json:"vds,omitempty"`
+	Services    string `json:"services"` // management, vmotion, vSAN, etc.
+}
+
+type HostHBA struct {
+	Host   string `json:"host"`
+	Device string `json:"device"`
+	Driver string `json:"driver"`
+	Type   string `json:"type"`
+	IQN    string `json:"iqn,omitempty"`
+	Status string `json:"status"`
+}
+
+type HostService struct {
+	Host    string `json:"host"`
+	Key     string `json:"key"`
+	Label   string `json:"label"`
+	Policy  string `json:"policy"`
+	Running bool   `json:"running"`
+}
+
+type HostFirewallRule struct {
+	Host    string `json:"host"`
+	Key     string `json:"key"`
+	Label   string `json:"label"`
+	Enabled bool   `json:"enabled"`
+}
+
+type HostPhysDisk struct {
+	Host        string  `json:"host"`
+	Device      string  `json:"device"`
+	DisplayName string  `json:"displayName"`
+	Vendor      string  `json:"vendor"`
+	Model       string  `json:"model"`
+	SerialNum   string  `json:"serialNumber"`
+	SizeGB      float64 `json:"sizeGB"`
+	SSD         bool    `json:"ssd"`
+}
+
+type HostNetConfig struct {
+	Host     string   `json:"host"`
+	Hostname string   `json:"hostname"`
+	Domain   string   `json:"domain"`
+	DNS      []string `json:"dnsServers"`
+	NTP      []string `json:"ntpServers"`
+	Lockdown string   `json:"lockdownMode"`
+}
+
+// ── Fetch: ESXi per-host detail ───────────────────────────────────────────────
+
+func fetchHostDetail(ctx context.Context, finder *find.Finder, pc *property.Collector) (
+	pnics []HostPNIC,
+	vmknics []HostVMKNIC,
+	hbas []HostHBA,
+	services []HostService,
+	fwRules []HostFirewallRule,
+	physDisks []HostPhysDisk,
+	netCfgs []HostNetConfig,
+	err error,
+) {
+	hosts, err := finder.HostSystemList(ctx, "*")
+	if err != nil {
+		if isNotFound(err) {
+			err = nil
+		}
+		return
+	}
+
+	var refs []types.ManagedObjectReference
+	for _, h := range hosts {
+		refs = append(refs, h.Reference())
+	}
+
+	var moHosts []mo.HostSystem
+	if err = pc.Retrieve(ctx, refs, []string{"summary", "config"}, &moHosts); err != nil {
+		return
+	}
+
+	for _, h := range moHosts {
+		hostName := h.Summary.Config.Name
+		cfg := h.Config
+		if cfg == nil {
+			continue
+		}
+
+		// ── Network config (DNS / NTP / lockdown) ──────────────────────────
+		nc := HostNetConfig{
+			Host:     hostName,
+			Lockdown: string(cfg.LockdownMode),
+		}
+		if cfg.Network != nil {
+			if dns := cfg.Network.DnsConfig; dns != nil {
+				dnsBase := dns.GetHostDnsConfig()
+				nc.Hostname = dnsBase.HostName
+				nc.Domain = dnsBase.DomainName
+				nc.DNS = dnsBase.Address
+			}
+		}
+		if cfg.DateTimeInfo != nil && cfg.DateTimeInfo.NtpConfig != nil {
+			nc.NTP = cfg.DateTimeInfo.NtpConfig.Server
+		}
+		netCfgs = append(netCfgs, nc)
+
+		// ── Physical NICs ──────────────────────────────────────────────────
+		if cfg.Network != nil {
+			for _, pnic := range cfg.Network.Pnic {
+				p := HostPNIC{
+					Host:   hostName,
+					Device: pnic.Device,
+					MAC:    pnic.Mac,
+					Driver: pnic.Driver,
+				}
+				if pnic.LinkSpeed != nil {
+					p.SpeedMb = pnic.LinkSpeed.SpeedMb
+					p.Duplex = pnic.LinkSpeed.Duplex
+					p.LinkUp = true
+				}
+				pnics = append(pnics, p)
+			}
+
+			// ── VMkernel NICs ──────────────────────────────────────────────
+			// Build a set of enabled services per vmknic
+			vmkServices := map[string][]string{}
+			if cfg.VirtualNicManagerInfo != nil {
+				for _, netCfg := range cfg.VirtualNicManagerInfo.NetConfig {
+					svcType := string(netCfg.NicType)
+					for _, sel := range netCfg.SelectedVnic {
+						vmkServices[sel] = append(vmkServices[sel], svcType)
+					}
+				}
+			}
+
+			for _, vnic := range cfg.Network.Vnic {
+				v := HostVMKNIC{
+					Host:      hostName,
+					Device:    vnic.Device,
+					Portgroup: vnic.Portgroup,
+				}
+				if vnic.Spec.Ip != nil {
+					v.IPAddress = vnic.Spec.Ip.IpAddress
+					v.SubnetMask = vnic.Spec.Ip.SubnetMask
+				}
+				v.MACAddress = vnic.Spec.Mac
+				v.MTU = vnic.Spec.Mtu
+				if vnic.Spec.DistributedVirtualPort != nil {
+					v.VDS = vnic.Spec.DistributedVirtualPort.SwitchUuid
+				}
+				// match by device key (vnic.Key looks like "VirtualNic:vmk0")
+				svcs := vmkServices[vnic.Key]
+				v.Services = strings.Join(svcs, ",")
+				vmknics = append(vmknics, v)
+			}
+		}
+
+		// ── HBAs ──────────────────────────────────────────────────────────
+		for _, hba := range cfg.StorageDevice.HostBusAdapter {
+			h := HostHBA{
+				Host:   hostName,
+				Status: string(hba.GetHostHostBusAdapter().Status),
+				Device: hba.GetHostHostBusAdapter().Device,
+				Driver: hba.GetHostHostBusAdapter().Driver,
+				Type:   fmt.Sprintf("%T", hba),
+			}
+			// trim the govmomi type prefix for readability
+			if idx := strings.LastIndex(h.Type, "."); idx >= 0 {
+				h.Type = h.Type[idx+1:]
+			}
+			// iSCSI software adapter has an IQN
+			if iscsi, ok := hba.(*types.HostInternetScsiHba); ok {
+				h.IQN = iscsi.IScsiName
+			}
+			hbas = append(hbas, h)
+		}
+
+		// ── Physical disks ─────────────────────────────────────────────────
+		for _, lun := range cfg.StorageDevice.ScsiLun {
+			disk, ok := lun.(*types.HostScsiDisk)
+			if !ok {
+				continue
+			}
+			base := disk.GetScsiLun()
+			sizeGB := bytesToGB(int64(disk.Capacity.Block) * int64(disk.Capacity.BlockSize))
+			physDisks = append(physDisks, HostPhysDisk{
+				Host:        hostName,
+				Device:      base.DeviceName,
+				DisplayName: base.DisplayName,
+				Vendor:      strings.TrimSpace(base.Vendor),
+				Model:       strings.TrimSpace(base.Model),
+				SerialNum:   base.SerialNumber,
+				SizeGB:      sizeGB,
+				SSD:         disk.Ssd != nil && *disk.Ssd,
+			})
+		}
+
+		// ── Services ──────────────────────────────────────────────────────
+		if cfg.Service != nil {
+			for _, svc := range cfg.Service.Service {
+				services = append(services, HostService{
+					Host:    hostName,
+					Key:     svc.Key,
+					Label:   svc.Label,
+					Policy:  svc.Policy,
+					Running: svc.Running,
+				})
+			}
+		}
+
+		// ── Firewall rules ─────────────────────────────────────────────────
+		if cfg.Firewall != nil {
+			for _, rule := range cfg.Firewall.Ruleset {
+				fwRules = append(fwRules, HostFirewallRule{
+					Host:    hostName,
+					Key:     rule.Key,
+					Label:   rule.Label,
+					Enabled: rule.Enabled,
+				})
+			}
+		}
+	}
+	return
+}
+
 type LicenseInfo struct {
 	Name       string `json:"name"`
 	Key        string `json:"key"`
@@ -808,6 +1050,39 @@ func runSections(ctx context.Context, client *govmomi.Client, dcName string, hos
 		},
 	}
 
+	// ── ESXi host detail (one API round-trip, split into 7 sections) ──────────
+	// Fetch synchronously so all sub-sections share the same result.
+	var (
+		hPNICs    []HostPNIC
+		hVMKNICs  []HostVMKNIC
+		hHBAs     []HostHBA
+		hServices []HostService
+		hFWRules  []HostFirewallRule
+		hDisks    []HostPhysDisk
+		hNetCfgs  []HostNetConfig
+		hDetailErr error
+	)
+	hPNICs, hVMKNICs, hHBAs, hServices, hFWRules, hDisks, hNetCfgs, hDetailErr =
+		fetchHostDetail(ctx, finder, pc)
+
+	detailSections := []fetcher{
+		{key: "host_net_config", title: "ESXi Network Config (DNS/NTP)", group: "ESXi Detail",
+			fn: func() (any, int, error) { return hNetCfgs, len(hNetCfgs), hDetailErr }},
+		{key: "host_pnics", title: "ESXi Physical NICs", group: "ESXi Detail",
+			fn: func() (any, int, error) { return hPNICs, len(hPNICs), hDetailErr }},
+		{key: "host_vmknics", title: "ESXi VMkernel NICs", group: "ESXi Detail",
+			fn: func() (any, int, error) { return hVMKNICs, len(hVMKNICs), hDetailErr }},
+		{key: "host_hbas", title: "ESXi HBAs", group: "ESXi Detail",
+			fn: func() (any, int, error) { return hHBAs, len(hHBAs), hDetailErr }},
+		{key: "host_disks", title: "ESXi Physical Disks", group: "ESXi Detail", collapsed: true,
+			fn: func() (any, int, error) { return hDisks, len(hDisks), hDetailErr }},
+		{key: "host_services", title: "ESXi Services", group: "ESXi Detail", collapsed: true,
+			fn: func() (any, int, error) { return hServices, len(hServices), hDetailErr }},
+		{key: "host_firewall", title: "ESXi Firewall Rules", group: "ESXi Detail", collapsed: true,
+			fn: func() (any, int, error) { return hFWRules, len(hFWRules), hDetailErr }},
+	}
+	fetchers = append(fetchers, detailSections...)
+
 	results := make([]section, len(fetchers))
 	var wg sync.WaitGroup
 	for i, f := range fetchers {
@@ -955,7 +1230,7 @@ func toTableHTML(data any) template.HTML {
 }
 
 func writeHTML(sections []section, generated string, outFile string) error {
-	groupOrder := []string{"Infrastructure", "Compute", "Storage", "Networking", "Identity"}
+	groupOrder := []string{"Infrastructure", "Compute", "Storage", "Networking", "Identity", "ESXi Detail"}
 	groupMap := map[string][]sectionHTML{}
 
 	for _, s := range sections {
