@@ -29,10 +29,16 @@ import (
 	"sync"
 	"time"
 
+	"crypto/tls"
+	"net"
+
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/property"
+	"github.com/vmware/govmomi/ssoadmin"
+	"github.com/vmware/govmomi/sts"
 	"github.com/vmware/govmomi/vim25/mo"
+	"github.com/vmware/govmomi/vim25/soap"
 	"github.com/vmware/govmomi/vim25/types"
 )
 
@@ -493,13 +499,209 @@ func fetchResourcePools(ctx context.Context, finder *find.Finder, pc *property.C
 	return out, nil
 }
 
+type LicenseInfo struct {
+	Name       string `json:"name"`
+	Key        string `json:"key"`
+	EditionKey string `json:"editionKey"`
+	Total      int32  `json:"total"`
+	Used       int32  `json:"used"`
+	CostUnit   string `json:"costUnit"`
+}
+
+type UserInfo struct {
+	Name      string `json:"name"`
+	Domain    string `json:"domain"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Email     string `json:"email"`
+	Disabled  bool   `json:"disabled"`
+	Locked    bool   `json:"locked"`
+	Kind      string `json:"kind"` // "person" or "solution"
+}
+
+type GroupInfo struct {
+	Name        string `json:"name"`
+	Domain      string `json:"domain"`
+	Description string `json:"description"`
+}
+
+type CertInfo struct {
+	Subject      string `json:"subject"`
+	Issuer       string `json:"issuer"`
+	DNSNames     []string `json:"dnsNames,omitempty"`
+	IPAddresses  []string `json:"ipAddresses,omitempty"`
+	NotBefore    string `json:"notBefore"`
+	NotAfter     string `json:"notAfter"`
+	SerialNumber string `json:"serialNumber"`
+	SHA256       string `json:"sha256Thumbprint"`
+	SHA1         string `json:"sha1Thumbprint"`
+	SelfSigned   bool   `json:"selfSigned"`
+}
+
+// ── Fetch: licenses ───────────────────────────────────────────────────────────
+
+func fetchLicenses(ctx context.Context, client *govmomi.Client) ([]LicenseInfo, error) {
+	lm := client.Client.ServiceContent.LicenseManager
+	if lm == nil {
+		return nil, nil
+	}
+	var mgr mo.LicenseManager
+	err := property.DefaultCollector(client.Client).RetrieveOne(ctx, *lm, []string{"licenses"}, &mgr)
+	if err != nil {
+		return nil, err
+	}
+	var out []LicenseInfo
+	for _, lic := range mgr.Licenses {
+		out = append(out, LicenseInfo{
+			Name:       lic.Name,
+			Key:        lic.LicenseKey,
+			EditionKey: lic.EditionKey,
+			Total:      lic.Total,
+			Used:       lic.Used,
+			CostUnit:   lic.CostUnit,
+		})
+	}
+	return out, nil
+}
+
+// ssoClient creates an ssoadmin.Client authenticated via an STS SAML token,
+// which is required even when the main govmomi session is already authenticated.
+func ssoClient(ctx context.Context, client *govmomi.Client, user *url.Userinfo) (*ssoadmin.Client, error) {
+	sc, err := ssoadmin.NewClient(ctx, client.Client)
+	if err != nil {
+		return nil, fmt.Errorf("ssoadmin.NewClient: %w", err)
+	}
+
+	tokens, err := sts.NewClient(ctx, client.Client)
+	if err != nil {
+		return nil, fmt.Errorf("sts.NewClient: %w", err)
+	}
+	signer, err := tokens.Issue(ctx, sts.TokenRequest{
+		Certificate: client.Client.Certificate(),
+		Userinfo:    user,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sts.Issue: %w", err)
+	}
+
+	header := soap.Header{Security: signer}
+	if err := sc.Login(sc.WithHeader(ctx, header)); err != nil {
+		return nil, fmt.Errorf("ssoadmin login: %w", err)
+	}
+	return sc, nil
+}
+
+// ── Fetch: SSO users & groups ─────────────────────────────────────────────────
+
+func fetchUsers(ctx context.Context, client *govmomi.Client, user *url.Userinfo) ([]UserInfo, error) {
+	sc, err := ssoClient(ctx, client, user)
+	if err != nil {
+		return nil, err
+	}
+	defer sc.Logout(ctx)
+
+	persons, err := sc.FindPersonUsers(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	solutions, err := sc.FindSolutionUsers(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+
+	var out []UserInfo
+	for _, u := range persons {
+		out = append(out, UserInfo{
+			Name:      u.Id.Name,
+			Domain:    u.Id.Domain,
+			FirstName: u.Details.FirstName,
+			LastName:  u.Details.LastName,
+			Email:     u.Details.EmailAddress,
+			Disabled:  u.Disabled,
+			Locked:    u.Locked,
+			Kind:      "person",
+		})
+	}
+	for _, u := range solutions {
+		out = append(out, UserInfo{
+			Name:   u.Id.Name,
+			Domain: u.Id.Domain,
+			Kind:   "solution",
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func fetchGroups(ctx context.Context, client *govmomi.Client, user *url.Userinfo) ([]GroupInfo, error) {
+	sc, err := ssoClient(ctx, client, user)
+	if err != nil {
+		return nil, err
+	}
+	defer sc.Logout(ctx)
+
+	groups, err := sc.FindGroups(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+
+	var out []GroupInfo
+	for _, g := range groups {
+		out = append(out, GroupInfo{
+			Name:        g.Id.Name,
+			Domain:      g.Id.Domain,
+			Description: g.Details.Description,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+
+// ── Fetch: TLS certificates ───────────────────────────────────────────────────
+
+func fetchCertificates(ctx context.Context, client *govmomi.Client, host string) ([]CertInfo, error) {
+	// Derive host:port from the govmomi client URL
+	addr := host
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		addr = net.JoinHostPort(addr, "443")
+	}
+
+	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		return nil, fmt.Errorf("tls dial %s: %w", addr, err)
+	}
+	defer conn.Close()
+
+	var out []CertInfo
+	for _, cert := range conn.ConnectionState().PeerCertificates {
+		var ips []string
+		for _, ip := range cert.IPAddresses {
+			ips = append(ips, ip.String())
+		}
+		out = append(out, CertInfo{
+			Subject:      cert.Subject.String(),
+			Issuer:       cert.Issuer.String(),
+			DNSNames:     cert.DNSNames,
+			IPAddresses:  ips,
+			NotBefore:    cert.NotBefore.UTC().Format(time.RFC3339),
+			NotAfter:     cert.NotAfter.UTC().Format(time.RFC3339),
+			SerialNumber: cert.SerialNumber.String(),
+			SHA256:       soap.ThumbprintSHA256(cert),
+			SHA1:         soap.ThumbprintSHA1(cert),
+			SelfSigned:   cert.Issuer.String() == cert.Subject.String(),
+		})
+	}
+	return out, nil
+}
+
 func isNotFound(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "not found")
 }
 
 // ── Parallel fetch orchestration ──────────────────────────────────────────────
 
-func runSections(ctx context.Context, client *govmomi.Client, dcName string) []section {
+func runSections(ctx context.Context, client *govmomi.Client, dcName string, host string, userinfo *url.Userinfo) []section {
 	finder := find.NewFinder(client.Client, true)
 	pc := property.DefaultCollector(client.Client)
 
@@ -573,6 +775,34 @@ func runSections(ctx context.Context, client *govmomi.Client, dcName string) []s
 			key: "resource_pools", title: "Resource Pools", group: "Compute",
 			fn: func() (any, int, error) {
 				d, err := fetchResourcePools(ctx, finder, pc)
+				return d, len(d), err
+			},
+		},
+		{
+			key: "licenses", title: "Licenses", group: "Infrastructure",
+			fn: func() (any, int, error) {
+				d, err := fetchLicenses(ctx, client)
+				return d, len(d), err
+			},
+		},
+		{
+			key: "users", title: "SSO Users", group: "Identity",
+			fn: func() (any, int, error) {
+				d, err := fetchUsers(ctx, client, userinfo)
+				return d, len(d), err
+			},
+		},
+		{
+			key: "groups", title: "SSO Groups", group: "Identity",
+			fn: func() (any, int, error) {
+				d, err := fetchGroups(ctx, client, userinfo)
+				return d, len(d), err
+			},
+		},
+		{
+			key: "certificates", title: "TLS Certificates", group: "Identity",
+			fn: func() (any, int, error) {
+				d, err := fetchCertificates(ctx, client, host)
 				return d, len(d), err
 			},
 		},
@@ -725,7 +955,7 @@ func toTableHTML(data any) template.HTML {
 }
 
 func writeHTML(sections []section, generated string, outFile string) error {
-	groupOrder := []string{"Infrastructure", "Compute", "Storage", "Networking"}
+	groupOrder := []string{"Infrastructure", "Compute", "Storage", "Networking", "Identity"}
 	groupMap := map[string][]sectionHTML{}
 
 	for _, s := range sections {
@@ -807,7 +1037,7 @@ func main() {
 
 	fmt.Printf("fetching inventory (datacenter: %s) ...\n", *dc)
 	start := time.Now()
-	sections := runSections(ctx, client, *dc)
+	sections := runSections(ctx, client, *dc, *host, u.User)
 	fmt.Printf("fetched in %s\n", time.Since(start).Truncate(time.Millisecond))
 
 	for _, s := range sections {
