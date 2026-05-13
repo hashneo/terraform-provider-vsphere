@@ -1135,122 +1135,730 @@ const htmlTmpl = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>vSphere Report</title>
 <style>
-  body{font-family:system-ui,sans-serif;margin:2rem;background:#f5f5f5;color:#222}
-  h1{color:#1a5276}
-  h2{color:#1f618d;margin-top:2rem;border-bottom:2px solid #aed6f1;padding-bottom:.3rem}
-  h3{color:#2874a6;margin:.5rem 0}
-  details{background:#fff;border:1px solid #d6eaf8;border-radius:6px;margin:.5rem 0;padding:.5rem 1rem}
-  summary{cursor:pointer;font-weight:600;font-size:.95rem}
-  .badge{background:#2e86c1;color:#fff;border-radius:10px;padding:.1rem .5rem;font-size:.8rem;margin-left:.4rem}
-  .err{color:#c0392b;font-style:italic}
-  .meta{color:#888;font-size:.8rem;margin-left:.5rem}
-  table{border-collapse:collapse;width:100%;margin:.5rem 0;font-size:.85rem}
-  th{background:#2e86c1;color:#fff;text-align:left;padding:.3rem .5rem}
-  td{padding:.25rem .5rem;border-bottom:1px solid #eaf2ff}
-  tr:nth-child(even) td{background:#eaf2ff}
-  .poweredOn{color:#1e8449} .poweredOff{color:#922b21} .suspended{color:#d4ac0d}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:13px;background:#f5f6fa;color:#222}
+header{background:#1a1a2e;color:#fff;padding:16px 24px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+header h1{font-size:18px;font-weight:600;letter-spacing:.5px}
+.header-meta{font-size:12px;color:#aab}
+.header-counts{display:flex;gap:12px;margin-left:auto;flex-wrap:wrap}
+.hcount{background:#ffffff22;border-radius:12px;padding:3px 10px;font-size:12px}
+.layout{display:flex;min-height:calc(100vh - 56px)}
+nav{width:200px;min-width:200px;background:#fff;border-right:1px solid #e2e8f0;padding:16px 0;position:sticky;top:0;height:calc(100vh - 56px);overflow-y:auto}
+nav .group-label{padding:10px 16px 4px;font-size:10px;font-weight:700;text-transform:uppercase;color:#94a3b8;letter-spacing:.8px}
+nav a{display:block;padding:6px 16px 6px 20px;color:#475569;text-decoration:none;font-size:12px;border-left:2px solid transparent;transition:all .15s}
+nav a:hover{background:#f1f5f9;color:#1a1a2e;border-left-color:#6366f1}
+main{flex:1;padding:20px 24px;min-width:0}
+.section-card{background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:16px;overflow:hidden}
+details>summary{list-style:none;padding:12px 16px;cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none;background:#fff;border-bottom:1px solid transparent}
+details>summary::-webkit-details-marker{display:none}
+details[open]>summary{border-bottom-color:#e2e8f0;background:#f8fafc}
+summary::before{content:"▶";font-size:10px;color:#94a3b8;transition:transform .2s;display:inline-block}
+details[open]>summary::before{transform:rotate(90deg)}
+.section-title{font-weight:600;font-size:13px;color:#1e293b}
+.section-count{background:#e2e8f0;color:#64748b;border-radius:10px;padding:1px 8px;font-size:11px}
+.section-count.error{background:#fee2e2;color:#dc2626}
+.elapsed{margin-left:auto;font-size:11px;color:#94a3b8}
+.group-badge{font-size:10px;padding:1px 7px;border-radius:8px;font-weight:500}
+.badge-infra{background:#ede9fe;color:#7c3aed}
+.badge-compute{background:#dbeafe;color:#2563eb}
+.badge-stor{background:#d1fae5;color:#065f46}
+.badge-net{background:#fef3c7;color:#92400e}
+.badge-id{background:#fee2e2;color:#9f1239}
+.badge-esxi{background:#e0f2fe;color:#0369a1}
+.error-banner{padding:12px 16px;background:#fff7ed;border-left:3px solid #f97316;color:#9a3412;font-size:12px}
+.table-wrap{overflow-x:auto;max-height:500px;overflow-y:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{position:sticky;top:0;background:#f8fafc;padding:8px 12px;text-align:left;font-weight:600;color:#64748b;border-bottom:2px solid #e2e8f0;white-space:nowrap}
+tbody tr:nth-child(even){background:#f9fafb}
+tbody tr:hover{background:#f1f5f9}
+td{padding:6px 12px;color:#334155;vertical-align:top;border-bottom:1px solid #f1f5f9;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+td.wrap{white-space:normal;word-break:break-word}
+td.mono{font-family:ui-monospace,monospace;font-size:11px}
+.badge{display:inline-block;border-radius:10px;padding:1px 8px;font-size:11px;font-weight:500}
+.green{background:#d1fae5;color:#065f46}
+.red{background:#fee2e2;color:#991b1b}
+.amber{background:#fef3c7;color:#92400e}
+.grey{background:#f1f5f9;color:#64748b}
+.kv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;padding:16px}
+.kv-item{background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px}
+.kv-label{font-size:10px;font-weight:600;text-transform:uppercase;color:#94a3b8;margin-bottom:2px}
+.kv-value{font-size:13px;color:#1e293b;word-break:break-word}
 </style>
 </head>
 <body>
-<h1>vSphere Inventory Report</h1>
-<p class="meta">Generated: {{.Generated}}</p>
-
-{{range .Groups}}
-<h2>{{.Name}}</h2>
-{{range .Sections}}
-<details{{if not .Collapsed}} open{{end}}>
-  <summary>{{.Title}} <span class="badge">{{.Count}}</span> <span class="meta">{{.Elapsed}}</span></summary>
-  {{if .Err}}<p class="err">Error: {{.Err}}</p>
-  {{else}}{{.TableHTML}}
+<header>
+  <h1>&#x2601; vSphere Report</h1>
+  <span class="header-meta">Generated: {{.Generated}}</span>
+  <span class="header-meta">Host: <code>{{.Host}}</code></span>
+  <div class="header-counts">
+    {{range .GroupCounts}}<span class="hcount">{{.Name}}: {{.Total}} items</span>{{end}}
+  </div>
+</header>
+<div class="layout">
+<nav>
+  {{range .Groups}}
+  <div class="group-label">{{.Name}}</div>
+  {{range .Sections}}
+  <a href="#{{.Key}}">{{.Title}}{{if .Err}} ⚠{{else if gt .Count 0}} ({{.Count}}){{end}}</a>
   {{end}}
-</details>
+  {{end}}
+</nav>
+<main>
+{{range .Sections}}
+<div class="section-card" id="{{.Key}}">
+  <details{{if not .Collapsed}} open{{end}}>
+    <summary>
+      <span class="section-title">{{.Title}}</span>
+      {{if .Err}}
+        <span class="section-count error">error</span>
+      {{else}}
+        <span class="section-count">{{.Count}}</span>
+      {{end}}
+      <span class="group-badge {{.GroupClass}}">{{.Group}}</span>
+      <span class="elapsed">{{.ElapsedStr}}</span>
+    </summary>
+    {{if .Err}}
+      <div class="error-banner">&#9888; {{.Err}}</div>
+    {{else}}
+      {{.TableHTML}}
+    {{end}}
+  </details>
+</div>
 {{end}}
-{{end}}
+</main>
+</div>
 </body>
 </html>`
 
-type groupData struct {
+// ── Template data types ───────────────────────────────────────────────────────
+
+type templateData struct {
+	Generated   string
+	Host        string
+	GroupCounts []groupCount
+	Groups      []groupNav
+	Sections    []sectionView
+}
+
+type groupCount struct {
+	Name  string
+	Total int
+}
+
+type groupNav struct {
 	Name     string
-	Sections []sectionHTML
+	Sections []sectionView
 }
 
-type sectionHTML struct {
-	Title     string
-	Count     int
-	Elapsed   string
-	Err       error
-	TableHTML template.HTML
-	Collapsed bool
+type sectionView struct {
+	Key        string
+	Title      string
+	Group      string
+	GroupClass string
+	Count      int
+	Err        error
+	ElapsedStr string
+	Collapsed  bool
+	TableHTML  template.HTML
 }
 
-func toTableHTML(data any) template.HTML {
-	if data == nil {
-		return "<p><em>No data</em></p>"
+func groupClass(group string) string {
+	switch group {
+	case "Infrastructure":
+		return "badge-infra"
+	case "Compute":
+		return "badge-compute"
+	case "Storage":
+		return "badge-stor"
+	case "Networking":
+		return "badge-net"
+	case "Identity":
+		return "badge-id"
+	case "ESXi Detail":
+		return "badge-esxi"
 	}
-	b, _ := json.Marshal(data)
-	var rows []map[string]any
-	if err := json.Unmarshal(b, &rows); err != nil || len(rows) == 0 {
-		return template.HTML("<pre>" + template.HTMLEscapeString(string(b)) + "</pre>")
-	}
-	// collect ordered keys from first row
-	keys := make([]string, 0)
-	seen := map[string]bool{}
-	for _, row := range rows {
-		for k := range row {
-			if !seen[k] {
-				seen[k] = true
-				keys = append(keys, k)
-			}
-		}
-	}
-	sort.Strings(keys)
+	return "grey"
+}
 
+func fmtElapsed(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
+// ── Table builder helpers ─────────────────────────────────────────────────────
+
+func openTable() string  { return `<div class="table-wrap"><table><thead><tr>` }
+func closeTable() string { return `</tbody></table></div>` }
+
+func th(cols ...string) string {
 	var sb strings.Builder
-	sb.WriteString("<table><tr>")
-	for _, k := range keys {
-		sb.WriteString("<th>" + template.HTMLEscapeString(k) + "</th>")
+	for _, c := range cols {
+		sb.WriteString(`<th>` + template.HTMLEscapeString(c) + `</th>`)
+	}
+	sb.WriteString(`</tr></thead><tbody>`)
+	return sb.String()
+}
+
+func td(vals ...template.HTML) string {
+	var sb strings.Builder
+	sb.WriteString("<tr>")
+	for _, v := range vals {
+		sb.WriteString(`<td>` + string(v) + `</td>`)
 	}
 	sb.WriteString("</tr>")
-	for _, row := range rows {
-		sb.WriteString("<tr>")
-		for _, k := range keys {
-			v := fmt.Sprintf("%v", row[k])
-			cls := ""
-			if k == "powerState" {
-				cls = " class=\"" + v + "\""
-			}
-			sb.WriteString("<td" + cls + ">" + template.HTMLEscapeString(v) + "</td>")
-		}
-		sb.WriteString("</tr>")
+	return sb.String()
+}
+
+func tdc(class string, val template.HTML) string {
+	return `<td class="` + class + `">` + string(val) + `</td>`
+}
+
+func hstr(s string) template.HTML {
+	if s == "" {
+		return `<span style="color:#cbd5e1">—</span>`
 	}
-	sb.WriteString("</table>")
+	return template.HTML(template.HTMLEscapeString(s))
+}
+
+func hbool(b bool) template.HTML {
+	if b {
+		return `<span class="badge green">yes</span>`
+	}
+	return `<span class="badge red">no</span>`
+}
+
+func hrunning(b bool) template.HTML {
+	if b {
+		return `<span class="badge green">running</span>`
+	}
+	return `<span class="badge grey">stopped</span>`
+}
+
+func hpower(s string) template.HTML {
+	switch s {
+	case "poweredOn":
+		return `<span class="badge green">on</span>`
+	case "poweredOff":
+		return `<span class="badge red">off</span>`
+	case "suspended":
+		return `<span class="badge amber">suspended</span>`
+	}
+	return hstr(s)
+}
+
+func hfloat(f float64, unit string) template.HTML {
+	return template.HTML(template.HTMLEscapeString(fmt.Sprintf("%.2f %s", f, unit)))
+}
+
+func hint(i interface{}) template.HTML {
+	return template.HTML(template.HTMLEscapeString(fmt.Sprintf("%v", i)))
+}
+
+func hlist(ss []string) template.HTML {
+	if len(ss) == 0 {
+		return `<span style="color:#cbd5e1">—</span>`
+	}
+	return template.HTML(template.HTMLEscapeString(strings.Join(ss, ", ")))
+}
+
+func kvGrid(items [][2]string) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(`<div class="kv-grid">`)
+	for _, kv := range items {
+		v := kv[1]
+		if v == "" {
+			v = "—"
+		}
+		sb.WriteString(`<div class="kv-item"><div class="kv-label">` +
+			template.HTMLEscapeString(kv[0]) +
+			`</div><div class="kv-value">` +
+			template.HTMLEscapeString(v) +
+			`</div></div>`)
+	}
+	sb.WriteString(`</div>`)
 	return template.HTML(sb.String())
 }
 
-func writeHTML(sections []section, generated string, outFile string) error {
+// ── Per-section table builders ────────────────────────────────────────────────
+
+func vcenterTable(items []VCenterInfo) template.HTML {
+	if len(items) == 0 {
+		return ""
+	}
+	v := items[0]
+	return kvGrid([][2]string{
+		{"Name", v.Name},
+		{"Full Name", v.FullName},
+		{"Version", v.Version},
+		{"Build", v.Build},
+		{"API Version", v.APIVersion},
+		{"OS Type", v.OSID},
+	})
+}
+
+func datacentersTable(items []DatacenterInfo) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Name", "MOID"))
+	for _, d := range items {
+		sb.WriteString(td(hstr(d.Name), hstr(d.MOID)))
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func clustersTable(items []ClusterInfo) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Name", "Hosts", "CPU Cores", "Total CPU", "Total Memory", "HA", "DRS", "DRS Mode"))
+	for _, c := range items {
+		sb.WriteString("<tr>")
+		sb.WriteString(tdc("", hstr(c.Name)))
+		sb.WriteString(tdc("", hint(c.NumHosts)))
+		sb.WriteString(tdc("", hint(c.NumCPUCores)))
+		sb.WriteString(tdc("", template.HTML(fmt.Sprintf("%d MHz", c.TotalCPUMHz))))
+		sb.WriteString(tdc("", hfloat(c.TotalMemoryGB, "GB")))
+		sb.WriteString(tdc("", hbool(c.HAEnabled)))
+		sb.WriteString(tdc("", hbool(c.DRSEnabled)))
+		sb.WriteString(tdc("", hstr(c.DRSBehavior)))
+		sb.WriteString("</tr>")
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func hostsTable(items []HostInfo) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Name", "Model", "CPU Model", "Pkgs", "Cores", "Threads", "MHz", "Memory", "ESXi Version", "Build", "Power", "State", "VMs"))
+	for _, h := range items {
+		sb.WriteString("<tr>")
+		sb.WriteString(tdc("", hstr(h.Name)))
+		sb.WriteString(tdc("", hstr(h.Model)))
+		sb.WriteString(tdc("wrap", hstr(h.CPUModel)))
+		sb.WriteString(tdc("", hint(h.NumCPUPkgs)))
+		sb.WriteString(tdc("", hint(h.NumCPUCores)))
+		sb.WriteString(tdc("", hint(h.NumCPUThreads)))
+		sb.WriteString(tdc("", hint(h.CPUMHz)))
+		sb.WriteString(tdc("", hfloat(h.MemoryGB, "GB")))
+		sb.WriteString(tdc("", hstr(h.ESXiVersion)))
+		sb.WriteString(tdc("mono", hstr(h.ESXiBuild)))
+		sb.WriteString(tdc("", hpower(h.PowerState)))
+		sb.WriteString(tdc("", hstr(h.ConnectionState)))
+		sb.WriteString(tdc("", hint(h.NumVMs)))
+		sb.WriteString("</tr>")
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func vmsTable(items []VMInfo) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Name", "Guest", "CPUs", "Memory", "Disks", "NICs", "Power", "IP Address", "Hostname", "Used Disk", "Provisioned", "Tools"))
+	for _, v := range items {
+		sb.WriteString("<tr>")
+		sb.WriteString(tdc("", hstr(v.Name)))
+		sb.WriteString(tdc("", hstr(v.GuestFullName)))
+		sb.WriteString(tdc("", hint(v.NumCPU)))
+		sb.WriteString(tdc("", template.HTML(fmt.Sprintf("%d MB", v.MemoryMB))))
+		sb.WriteString(tdc("", hint(v.NumDisks)))
+		sb.WriteString(tdc("", hint(v.NumNICs)))
+		sb.WriteString(tdc("", hpower(v.PowerState)))
+		sb.WriteString(tdc("mono", hstr(v.IPAddress)))
+		sb.WriteString(tdc("", hstr(v.Hostname)))
+		sb.WriteString(tdc("", hfloat(v.UsedDiskGB, "GB")))
+		sb.WriteString(tdc("", hfloat(v.ProvisionedGB, "GB")))
+		sb.WriteString(tdc("", hstr(v.ToolsStatus)))
+		sb.WriteString("</tr>")
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func datastoresTable(items []DatastoreInfo) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Name", "Type", "Capacity", "Free", "Used %", "Accessible", "Hosts", "VMs"))
+	for _, d := range items {
+		usedPctBadge := template.HTML(fmt.Sprintf("%.1f%%", d.UsedPct))
+		if d.UsedPct >= 90 {
+			usedPctBadge = template.HTML(fmt.Sprintf(`<span class="badge red">%.1f%%</span>`, d.UsedPct))
+		} else if d.UsedPct >= 75 {
+			usedPctBadge = template.HTML(fmt.Sprintf(`<span class="badge amber">%.1f%%</span>`, d.UsedPct))
+		}
+		sb.WriteString("<tr>")
+		sb.WriteString(tdc("", hstr(d.Name)))
+		sb.WriteString(tdc("", hstr(d.Type)))
+		sb.WriteString(tdc("", hfloat(d.CapacityGB, "GB")))
+		sb.WriteString(tdc("", hfloat(d.FreeGB, "GB")))
+		sb.WriteString(tdc("", usedPctBadge))
+		sb.WriteString(tdc("", hbool(d.Accessible)))
+		sb.WriteString(tdc("", hint(d.NumHosts)))
+		sb.WriteString(tdc("", hint(d.NumVMs)))
+		sb.WriteString("</tr>")
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func networksTable(items []NetworkInfo) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Name", "Type", "VLAN ID", "Ports", "Hosts", "DVS"))
+	for _, n := range items {
+		sb.WriteString("<tr>")
+		sb.WriteString(tdc("", hstr(n.Name)))
+		sb.WriteString(tdc("", hstr(n.Type)))
+		vlan := template.HTML("—")
+		if n.VlanID > 0 {
+			vlan = hint(n.VlanID)
+		}
+		sb.WriteString(tdc("", vlan))
+		sb.WriteString(tdc("", hint(n.NumPorts)))
+		sb.WriteString(tdc("", hint(n.NumHosts)))
+		sb.WriteString(tdc("mono", hstr(n.DVSName)))
+		sb.WriteString("</tr>")
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func resourcePoolsTable(items []ResourcePoolInfo) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Name", "MOID", "Parent", "VMs"))
+	for _, r := range items {
+		sb.WriteString(td(hstr(r.Name), hstr(r.MOID), hstr(r.Parent), hint(r.NumVMs)))
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func licensesTable(items []LicenseInfo) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Name", "Edition", "Used", "Total", "Cost Unit"))
+	for _, l := range items {
+		sb.WriteString(td(hstr(l.Name), hstr(l.EditionKey), hint(l.Used), hint(l.Total), hstr(l.CostUnit)))
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func usersTable(items []UserInfo) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Name", "Domain", "Kind", "First Name", "Last Name", "Email", "Disabled", "Locked"))
+	for _, u := range items {
+		sb.WriteString("<tr>")
+		sb.WriteString(tdc("", hstr(u.Name)))
+		sb.WriteString(tdc("", hstr(u.Domain)))
+		sb.WriteString(tdc("", hstr(u.Kind)))
+		sb.WriteString(tdc("", hstr(u.FirstName)))
+		sb.WriteString(tdc("", hstr(u.LastName)))
+		sb.WriteString(tdc("", hstr(u.Email)))
+		sb.WriteString(tdc("", hbool(u.Disabled)))
+		sb.WriteString(tdc("", hbool(u.Locked)))
+		sb.WriteString("</tr>")
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func groupsTable(items []GroupInfo) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Name", "Domain", "Description"))
+	for _, g := range items {
+		sb.WriteString(td(hstr(g.Name), hstr(g.Domain), hstr(g.Description)))
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func certsTable(items []CertInfo) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Subject", "Issuer", "DNS / IP SANs", "Not Before", "Not After", "Self-Signed", "SHA-256"))
+	for _, c := range items {
+		sans := append(c.DNSNames, c.IPAddresses...)
+		sb.WriteString("<tr>")
+		sb.WriteString(tdc("wrap", hstr(c.Subject)))
+		sb.WriteString(tdc("wrap", hstr(c.Issuer)))
+		sb.WriteString(tdc("wrap", hlist(sans)))
+		sb.WriteString(tdc("mono", hstr(c.NotBefore)))
+		sb.WriteString(tdc("mono", hstr(c.NotAfter)))
+		sb.WriteString(tdc("", hbool(c.SelfSigned)))
+		sb.WriteString(tdc("mono wrap", hstr(c.SHA256)))
+		sb.WriteString("</tr>")
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func hostNetConfigTable(items []HostNetConfig) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Host", "Hostname", "Domain", "DNS Servers", "NTP Servers", "Lockdown"))
+	for _, n := range items {
+		sb.WriteString("<tr>")
+		sb.WriteString(tdc("mono", hstr(n.Host)))
+		sb.WriteString(tdc("", hstr(n.Hostname)))
+		sb.WriteString(tdc("", hstr(n.Domain)))
+		sb.WriteString(tdc("wrap", hlist(n.DNS)))
+		sb.WriteString(tdc("wrap", hlist(n.NTP)))
+		sb.WriteString(tdc("", hstr(n.Lockdown)))
+		sb.WriteString("</tr>")
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func hostPNICsTable(items []HostPNIC) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Host", "Device", "MAC", "Speed (Mb)", "Full Duplex", "Driver", "Link Up"))
+	for _, n := range items {
+		sb.WriteString("<tr>")
+		sb.WriteString(tdc("mono", hstr(n.Host)))
+		sb.WriteString(tdc("", hstr(n.Device)))
+		sb.WriteString(tdc("mono", hstr(n.MAC)))
+		sb.WriteString(tdc("", hint(n.SpeedMb)))
+		sb.WriteString(tdc("", hbool(n.Duplex)))
+		sb.WriteString(tdc("", hstr(n.Driver)))
+		sb.WriteString(tdc("", hbool(n.LinkUp)))
+		sb.WriteString("</tr>")
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func hostVMKNICsTable(items []HostVMKNIC) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Host", "Device", "IP Address", "Subnet Mask", "MAC", "MTU", "Services", "DVS"))
+	for _, n := range items {
+		sb.WriteString("<tr>")
+		sb.WriteString(tdc("mono", hstr(n.Host)))
+		sb.WriteString(tdc("", hstr(n.Device)))
+		sb.WriteString(tdc("mono", hstr(n.IPAddress)))
+		sb.WriteString(tdc("mono", hstr(n.SubnetMask)))
+		sb.WriteString(tdc("mono", hstr(n.MACAddress)))
+		sb.WriteString(tdc("", hint(n.MTU)))
+		sb.WriteString(tdc("", hstr(n.Services)))
+		sb.WriteString(tdc("mono wrap", hstr(n.VDS)))
+		sb.WriteString("</tr>")
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func hostHBAsTable(items []HostHBA) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Host", "Device", "Type", "Driver", "Status", "IQN"))
+	for _, h := range items {
+		sb.WriteString("<tr>")
+		sb.WriteString(tdc("mono", hstr(h.Host)))
+		sb.WriteString(tdc("", hstr(h.Device)))
+		sb.WriteString(tdc("", hstr(h.Type)))
+		sb.WriteString(tdc("", hstr(h.Driver)))
+		sb.WriteString(tdc("", hstr(h.Status)))
+		sb.WriteString(tdc("mono wrap", hstr(h.IQN)))
+		sb.WriteString("</tr>")
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func hostDisksTable(items []HostPhysDisk) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Host", "Display Name", "Vendor", "Model", "Size", "SSD"))
+	for _, d := range items {
+		sb.WriteString("<tr>")
+		sb.WriteString(tdc("mono", hstr(d.Host)))
+		sb.WriteString(tdc("wrap", hstr(d.DisplayName)))
+		sb.WriteString(tdc("", hstr(d.Vendor)))
+		sb.WriteString(tdc("", hstr(d.Model)))
+		sb.WriteString(tdc("", hfloat(d.SizeGB, "GB")))
+		sb.WriteString(tdc("", hbool(d.SSD)))
+		sb.WriteString("</tr>")
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func hostServicesTable(items []HostService) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Host", "Key", "Label", "Policy", "Running"))
+	for _, s := range items {
+		sb.WriteString("<tr>")
+		sb.WriteString(tdc("mono", hstr(s.Host)))
+		sb.WriteString(tdc("mono", hstr(s.Key)))
+		sb.WriteString(tdc("", hstr(s.Label)))
+		sb.WriteString(tdc("", hstr(s.Policy)))
+		sb.WriteString(tdc("", hrunning(s.Running)))
+		sb.WriteString("</tr>")
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+func hostFirewallTable(items []HostFirewallRule) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(openTable())
+	sb.WriteString(th("Host", "Key", "Label", "Enabled"))
+	for _, r := range items {
+		sb.WriteString("<tr>")
+		sb.WriteString(tdc("mono", hstr(r.Host)))
+		sb.WriteString(tdc("mono", hstr(r.Key)))
+		sb.WriteString(tdc("", hstr(r.Label)))
+		sb.WriteString(tdc("", hbool(r.Enabled)))
+		sb.WriteString("</tr>")
+	}
+	sb.WriteString(closeTable())
+	return template.HTML(sb.String())
+}
+
+// ── Dispatch: key → typed table builder ──────────────────────────────────────
+
+func buildTableHTML(s section) template.HTML {
+	if s.Data == nil {
+		return `<div style="padding:12px 16px;color:#94a3b8;font-size:12px">No data.</div>`
+	}
+	switch s.Key {
+	case "vcenter":
+		if v, ok := s.Data.([]VCenterInfo); ok {
+			return vcenterTable(v)
+		}
+	case "datacenters":
+		if v, ok := s.Data.([]DatacenterInfo); ok {
+			return datacentersTable(v)
+		}
+	case "clusters":
+		if v, ok := s.Data.([]ClusterInfo); ok {
+			return clustersTable(v)
+		}
+	case "hosts":
+		if v, ok := s.Data.([]HostInfo); ok {
+			return hostsTable(v)
+		}
+	case "vms":
+		if v, ok := s.Data.([]VMInfo); ok {
+			return vmsTable(v)
+		}
+	case "datastores":
+		if v, ok := s.Data.([]DatastoreInfo); ok {
+			return datastoresTable(v)
+		}
+	case "networks":
+		if v, ok := s.Data.([]NetworkInfo); ok {
+			return networksTable(v)
+		}
+	case "resource_pools":
+		if v, ok := s.Data.([]ResourcePoolInfo); ok {
+			return resourcePoolsTable(v)
+		}
+	case "licenses":
+		if v, ok := s.Data.([]LicenseInfo); ok {
+			return licensesTable(v)
+		}
+	case "users":
+		if v, ok := s.Data.([]UserInfo); ok {
+			return usersTable(v)
+		}
+	case "groups":
+		if v, ok := s.Data.([]GroupInfo); ok {
+			return groupsTable(v)
+		}
+	case "certificates":
+		if v, ok := s.Data.([]CertInfo); ok {
+			return certsTable(v)
+		}
+	case "host_net_config":
+		if v, ok := s.Data.([]HostNetConfig); ok {
+			return hostNetConfigTable(v)
+		}
+	case "host_pnics":
+		if v, ok := s.Data.([]HostPNIC); ok {
+			return hostPNICsTable(v)
+		}
+	case "host_vmknics":
+		if v, ok := s.Data.([]HostVMKNIC); ok {
+			return hostVMKNICsTable(v)
+		}
+	case "host_hbas":
+		if v, ok := s.Data.([]HostHBA); ok {
+			return hostHBAsTable(v)
+		}
+	case "host_disks":
+		if v, ok := s.Data.([]HostPhysDisk); ok {
+			return hostDisksTable(v)
+		}
+	case "host_services":
+		if v, ok := s.Data.([]HostService); ok {
+			return hostServicesTable(v)
+		}
+	case "host_firewall":
+		if v, ok := s.Data.([]HostFirewallRule); ok {
+			return hostFirewallTable(v)
+		}
+	}
+	return `<div style="padding:12px 16px;color:#94a3b8;font-size:12px">No renderer for this section.</div>`
+}
+
+// ── writeHTML ─────────────────────────────────────────────────────────────────
+
+func writeHTML(sections []section, generated string, host string, outFile string) error {
 	groupOrder := []string{"Infrastructure", "Compute", "Storage", "Networking", "Identity", "ESXi Detail"}
-	groupMap := map[string][]sectionHTML{}
+
+	// Build flat list of sectionViews keyed by group
+	groupMap := map[string][]sectionView{}
+	allViews := []sectionView{}
 
 	for _, s := range sections {
-		sh := sectionHTML{
-			Title:     s.Title,
-			Count:     s.Count,
-			Elapsed:   s.Elapsed.Truncate(time.Millisecond).String(),
-			Err:       s.Err,
-			Collapsed: s.Collapsed,
+		sv := sectionView{
+			Key:        s.Key,
+			Title:      s.Title,
+			Group:      s.Group,
+			GroupClass: groupClass(s.Group),
+			Count:      s.Count,
+			Err:        s.Err,
+			ElapsedStr: fmtElapsed(s.Elapsed),
+			Collapsed:  s.Collapsed,
 		}
 		if s.Err == nil {
-			sh.TableHTML = toTableHTML(s.Data)
+			sv.TableHTML = buildTableHTML(s)
 		}
-		groupMap[s.Group] = append(groupMap[s.Group], sh)
+		groupMap[s.Group] = append(groupMap[s.Group], sv)
+		allViews = append(allViews, sv)
 	}
 
-	var groups []groupData
+	// Nav groups
+	var navGroups []groupNav
 	for _, g := range groupOrder {
 		if secs, ok := groupMap[g]; ok {
-			groups = append(groups, groupData{Name: g, Sections: secs})
+			navGroups = append(navGroups, groupNav{Name: g, Sections: secs})
+		}
+	}
+
+	// Header counts per group
+	var groupCounts []groupCount
+	for _, g := range groupOrder {
+		total := 0
+		for _, sv := range groupMap[g] {
+			total += sv.Count
+		}
+		if total > 0 {
+			groupCounts = append(groupCounts, groupCount{Name: g, Total: total})
 		}
 	}
 
@@ -1267,9 +1875,12 @@ func writeHTML(sections []section, generated string, outFile string) error {
 	}
 	defer f.Close()
 
-	return tmpl.Execute(f, map[string]any{
-		"Generated": generated,
-		"Groups":    groups,
+	return tmpl.Execute(f, templateData{
+		Generated:   generated,
+		Host:        host,
+		GroupCounts: groupCounts,
+		Groups:      navGroups,
+		Sections:    allViews,
 	})
 }
 
@@ -1332,7 +1943,7 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		if err := writeHTML(sections, generated, *outFile); err != nil {
+		if err := writeHTML(sections, generated, *host, *outFile); err != nil {
 			fmt.Fprintf(os.Stderr, "write error: %v\n", err)
 			os.Exit(1)
 		}
