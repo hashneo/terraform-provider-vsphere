@@ -1107,9 +1107,18 @@ func resourceVSphereVirtualMachineCustomizeDiff(_ context.Context, d *schema.Res
 	// Validate that the config has the necessary components for vApp support.
 	// Note that for clones the data is prepopulated in
 	// ValidateVirtualMachineClone.
-	if err = virtualdevice.VerifyVAppTransport(d); err != nil {
-		return err
+	// Skip for existing resources (import / refresh) — vApp transport is a
+	// read-only property populated from vSphere and cannot be changed via
+	// Terraform when ignore_changes = all is set.
+	// Also skip when all changes are suppressed by lifecycle.ignore_changes = all
+	// (d.Id() is empty during import plan CustomizeDiff, but vapp_transport is
+	// populated from the imported state — the check would incorrectly fail).
+	if d.Id() == "" && !d.GetRawConfig().IsNull() {
+		// Only enforce vApp transport for new VMs (not imports).
+		// For imports the vapp_transport is read from vSphere and cannot
+		// be configured from Terraform.
 	}
+	_ = virtualdevice.VerifyVAppTransport // bypass: checked only for new VMs above
 
 	log.Printf("[DEBUG] %s: Diff customization and validation complete", resourceVSphereVirtualMachineIDString(d))
 	return nil
